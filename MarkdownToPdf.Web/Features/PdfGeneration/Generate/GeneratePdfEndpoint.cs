@@ -1,6 +1,5 @@
 ﻿using Carter;
 using MediatR;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using MarkdownToPdf.Web.Shared.Constants;
@@ -16,7 +15,9 @@ public sealed class GeneratePdfEndpoint : ICarterModule
         var group = app.MapGroup(string.Empty)
                        .WithTags(Api.Tags.PdfGeneration);
 
-        group.MapPost(Api.Routes.PdfGeneration.Generate, HandleGenerateAsync);
+        group.MapPost(Api.Routes.PdfGeneration.Generate, HandleGenerateAsync)
+            .RequireRateLimiting("PdfGenerationPolicy"); // Attaches the specific policy
+
         group.MapGet($"{Api.Routes.PdfGeneration.Prefix}/download/{{fileId:guid}}", HandleDownloadAsync);
     }
 

@@ -15,8 +15,8 @@
 
     <script>
         document.addEventListener('htmx:beforeOnLoad', function (evt) {
-        // Intercept 400 Bad Request responses (Validation Errors)
-        if (evt.detail.xhr.status === 400) {
+        // Intercept both 400 Bad Request (Validation) and 429 Too Many Requests (Rate Limiting)
+        if (evt.detail.xhr.status === 400 || evt.detail.xhr.status === 429) {
         // Tell HTMX: "Do not drop this. It contains valid HTML error alerts. Swap it."
         evt.detail.shouldSwap = true;
         evt.detail.isError = false;
