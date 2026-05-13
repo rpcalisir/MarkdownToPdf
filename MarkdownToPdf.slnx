@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="MarkdownToPdf.Tests/MarkdownToPdf.Tests.csproj" Id="2b238b89-36fb-475a-ad89-192c9986402e" />
   <Project Path="MarkdownToPdf.Web/MarkdownToPdf.Web.csproj" />
 </Solution>

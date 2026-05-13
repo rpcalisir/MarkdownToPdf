@@ -65,3 +65,5 @@ finally
     // Ensures all logs are flushed to the sink before the application dies
     Log.CloseAndFlush();
 }
+
+public partial class Program { }

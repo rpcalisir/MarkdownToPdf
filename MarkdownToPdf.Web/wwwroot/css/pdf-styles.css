@@ -66,10 +66,9 @@ pre {
     color: var(--code-text);
     border-radius: 8px;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    /* ENTERPRISE FIX: Force text wrapping so it doesn't blow out Flexbox or get cut off the PDF */
-    white-space: pre-wrap; /* CSS 3 */
-    white-space: -moz-pre-wrap; /* Mozilla */
-    word-wrap: break-word; /* IE */
+    /* ENTERPRISE FIX: Removed obsolete -moz-pre-wrap to clear linter warnings */
+    white-space: pre-wrap; /* CSS 3 standard */
+    word-wrap: break-word; /* Fallback */
     overflow-x: hidden; /* Disable horizontal scroll completely */
 }
 
