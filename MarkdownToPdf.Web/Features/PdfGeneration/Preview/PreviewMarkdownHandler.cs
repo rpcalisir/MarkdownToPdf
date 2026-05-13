@@ -6,21 +6,22 @@ namespace MarkdownToPdf.Web.Features.PdfGeneration.Preview;
 
 internal sealed class PreviewMarkdownHandler : IRequestHandler<PreviewMarkdownCommand, Result<string>>
 {
+    // PERFORMANCE: Compile the heavy parsing engine exactly once per application lifecycle.
+    // By making this static, we eliminate massive object allocation overhead on every keystroke.
+    private static readonly MarkdownPipeline _pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .DisableHtml()
+        .Build();
+
     public Task<Result<string>> Handle(PreviewMarkdownCommand request, CancellationToken cancellationToken)
     {
-        // If the user clears the editor, simply return an empty string to clear the preview pane
         if (string.IsNullOrWhiteSpace(request.MarkdownText))
         {
             return Task.FromResult(Result<string>.Success(string.Empty));
         }
 
-        // Parse markdown strictly securely for the live preview
-        var pipeline = new MarkdownPipelineBuilder()
-            .UseAdvancedExtensions()
-            .DisableHtml()
-            .Build();
-
-        var html = Markdown.ToHtml(request.MarkdownText, pipeline);
+        // Use the pre-compiled static pipeline
+        var html = Markdown.ToHtml(request.MarkdownText, _pipeline);
 
         return Task.FromResult(Result<string>.Success(html));
     }

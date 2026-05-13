@@ -3,6 +3,9 @@
     ViewData["Title"] = "Markdown to PDF";
 }
 
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
 <div id="toast-container" class="fixed top-4 right-4 z-50 w-96"></div>
 
 <form class="flex flex-col h-[calc(100vh-80px)]"
@@ -24,7 +27,7 @@
 
     <div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-gray-100">
         
-        <div class="flex-1 flex flex-col border-r border-gray-300">
+        <div class="flex-1 flex flex-col border-r border-gray-300 min-w-0">
             <div class="bg-gray-200 px-4 py-2 text-xs font-bold text-gray-600 uppercase tracking-widest border-b border-gray-300">
                 Editor
             </div>
@@ -36,13 +39,27 @@
                       placeholder="# Type your markdown here..."></textarea>
         </div>
 
-        <div class="flex-1 flex flex-col">
+        <div class="flex-1 flex flex-col min-w-0">
             <div class="bg-gray-200 px-4 py-2 text-xs font-bold text-gray-600 uppercase tracking-widest border-b border-gray-300">
                 Live Preview
             </div>
-            <div id="preview-pane" class="flex-1 p-8 overflow-y-auto bg-white">
+            <div id="preview-pane" class="flex-1 p-8 overflow-y-auto bg-white markdown-body">
                 <div class="text-gray-400 text-center mt-10">Start typing to see your live preview...</div>
             </div>
         </div>
     </div>
 </form>
+
+<script>
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+    if(evt.detail.target.id === 'preview-pane') {
+    document.querySelectorAll('#preview-pane pre code').forEach((el) => {
+    hljs.highlightElement(el);
+    });
+    }
+    });
+</script>
+
+<style>
+    @@import url('/css/pdf-styles.css');
+</style>

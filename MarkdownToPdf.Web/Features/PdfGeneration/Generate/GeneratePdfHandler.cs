@@ -14,30 +14,39 @@ internal sealed class GeneratePdfHandler(
     IWebHostEnvironment env)
     : IRequestHandler<GeneratePdfCommand, Result<byte[]>>
 {
-    // PERFORMANCE: Ensures the heavy browser download only executes once per application lifecycle
-    private static bool _isBrowserDownloaded = false;
-    private static readonly SemaphoreSlim _browserLock = new(1, 1);
+    // PERFORMANCE LEVEL 1: Static Parsing Engine
+    private static readonly MarkdownPipeline _pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .DisableHtml()
+        .Build();
+
+    // PERFORMANCE LEVEL 2: In-Memory File Caching to prevent repetitive Disk I/O
+    private static string? _cachedCss;
+
+    // PERFORMANCE LEVEL 3: Singleton Browser Instance to prevent slow OS process boot-ups
+    private static IBrowser? _browser;
+    private static readonly SemaphoreSlim _lock = new(1, 1);
 
     public async Task<Result<byte[]>> Handle(GeneratePdfCommand request, CancellationToken cancellationToken)
     {
         try
         {
-            var cssPath = Path.Combine(env.WebRootPath, "css", "pdf-styles.css");
-            var cssContent = await File.ReadAllTextAsync(cssPath, cancellationToken);
+            // 1. Load CSS from Memory (Only hits the hard drive on the very first request)
+            if (_cachedCss is null)
+            {
+                var cssPath = Path.Combine(env.WebRootPath, "css", "pdf-styles.css");
+                _cachedCss = await File.ReadAllTextAsync(cssPath, cancellationToken);
+            }
 
-            // SECURITY: DisableHtml() prevents users from injecting raw <script> or <iframe> tags via markdown
-            var pipeline = new MarkdownPipelineBuilder()
-                .UseAdvancedExtensions()
-                .DisableHtml()
-                .Build();
+            // 2. Parse Markdown instantly using the static pipeline
+            var rawHtmlContent = Markdown.ToHtml(request.MarkdownText, _pipeline);
 
-            var rawHtmlContent = Markdown.ToHtml(request.MarkdownText, pipeline);
-
+            // 3. Render HTML
             var fullHtmlDocument = await htmlRenderer.Dispatcher.InvokeAsync(async () =>
             {
                 var dictionary = new Dictionary<string, object?>
                 {
-                    { nameof(PdfDocumentTemplate.CssStyles), cssContent },
+                    { nameof(PdfDocumentTemplate.CssStyles), _cachedCss },
                     { nameof(PdfDocumentTemplate.ParsedHtmlContent), rawHtmlContent }
                 };
                 var parameters = ParameterView.FromDictionary(dictionary);
@@ -46,33 +55,32 @@ internal sealed class GeneratePdfHandler(
                 return output.ToHtmlString();
             });
 
-            // Thread-safe check to initialize Puppeteer resources
-            if (!_isBrowserDownloaded)
+            // 4. Manage the Singleton Browser safely
+            if (_browser is null || _browser.IsClosed)
             {
-                await _browserLock.WaitAsync(cancellationToken);
+                await _lock.WaitAsync(cancellationToken);
                 try
                 {
-                    if (!_isBrowserDownloaded)
+                    if (_browser is null || _browser.IsClosed)
                     {
                         var browserFetcher = new BrowserFetcher();
                         await browserFetcher.DownloadAsync();
-                        _isBrowserDownloaded = true;
+
+                        _browser = await Puppeteer.LaunchAsync(new LaunchOptions
+                        {
+                            Headless = true,
+                            Args = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-javascript"]
+                        });
                     }
                 }
                 finally
                 {
-                    _browserLock.Release();
+                    _lock.Release();
                 }
             }
 
-            // SECURITY: Disable JavaScript execution inside the Chromium instance to prevent Server-Side Request Forgery
-            await using var browser = await Puppeteer.LaunchAsync(new LaunchOptions
-            {
-                Headless = true,
-                Args = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-javascript"]
-            });
-
-            await using var page = await browser.NewPageAsync();
+            // 5. Open a lightweight page tab instead of a whole new browser
+            await using var page = await _browser.NewPageAsync();
             await page.SetJavaScriptEnabledAsync(false);
 
             await page.SetContentAsync(fullHtmlDocument, new PuppeteerSharp.NavigationOptions { WaitUntil = [WaitUntilNavigation.Networkidle0] });
@@ -82,6 +90,9 @@ internal sealed class GeneratePdfHandler(
                 PrintBackground = true,
                 PreferCSSPageSize = true
             });
+
+            // Clean up the tab to free memory, leaving the main browser process alive for the next user
+            await page.CloseAsync();
 
             return Result<byte[]>.Success(pdfBytes);
         }
