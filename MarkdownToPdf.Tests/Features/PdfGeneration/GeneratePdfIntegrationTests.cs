@@ -1,6 +1,8 @@
 ﻿using FluentAssertions;
 using MarkdownToPdf.Web.Features.PdfGeneration;
+using MarkdownToPdf.Web.Features.PdfGeneration.Jobs;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Text.RegularExpressions;
@@ -10,106 +12,126 @@ namespace MarkdownToPdf.Tests.Features.PdfGeneration;
 
 public sealed class GeneratePdfIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 {
+    private readonly WebApplicationFactory<Program> _factory;
     private readonly HttpClient _client;
 
     public GeneratePdfIntegrationTests(WebApplicationFactory<Program> factory)
     {
-        // 2. Intercept the WebApplicationFactory to swap out the real service with the Fake
         var clientOptions = new WebApplicationFactoryClientOptions { AllowAutoRedirect = false };
 
-        _client = factory.WithWebHostBuilder(builder =>
+        _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureServices(services =>
             {
-                // Find the existing Puppeteer registration and remove it
                 var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IPdfService));
                 if (descriptor != null)
                 {
                     services.Remove(descriptor);
                 }
 
-                // Inject our lightning-fast fake
                 services.AddSingleton<IPdfService, FakePdfService>();
             });
-        }).CreateClient(clientOptions);
+        });
+
+        _client = _factory.CreateClient(clientOptions);
     }
 
-    [Fact]
-    public async Task Post_GeneratePdf_ShouldReturnHtmlToast_WhenValidationFails()
+    private async Task<string> GetAntiforgeryTokenAsync()
     {
-        // 1. Arrange: GET the page to establish a session and grab the Antiforgery token
         var getResponse = await _client.GetAsync("/");
         var html = await getResponse.Content.ReadAsStringAsync();
 
         var tokenMatch = Regex.Match(html, @"name=""__RequestVerificationToken"" type=""hidden"" value=""([^""]+)""");
         var token = tokenMatch.Success ? tokenMatch.Groups[1].Value : "";
 
-        // Grab the Antiforgery cookie and attach it to the client
         var cookies = getResponse.Headers.GetValues("Set-Cookie");
         _client.DefaultRequestHeaders.Add("Cookie", cookies);
 
-        // 2. Prepare payload including the extracted token
+        return token;
+    }
+
+    [Fact]
+    public async Task Post_GeneratePdf_ShouldReturnHtmlToast_WhenValidationFails()
+    {
+        var token = await GetAntiforgeryTokenAsync();
         var content = new FormUrlEncodedContent([
             new KeyValuePair<string, string>("MarkdownText", ""),
             new KeyValuePair<string, string>("__RequestVerificationToken", token)
         ]);
 
-        // 3. Act: Hit the endpoint
         var response = await _client.PostAsync("/api/pdf/generate", content);
         var responseString = await response.Content.ReadAsStringAsync();
 
-        // 4. Assert: We now receive our custom HTML Toast instead of a generic text error
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         response.Content.Headers.ContentType?.MediaType.Should().Be("text/html");
         responseString.Should().Contain("Oops! Please type or paste some Markdown");
     }
 
     [Fact]
-    public async Task Post_GeneratePdf_ShouldReturnRedirectAndServePdf_WhenMarkdownIsValid()
+    public async Task Post_GeneratePdf_ShouldReturnAcceptedAndPollUntilDownloadIframeIsRendered_WhenMarkdownIsValid()
     {
-        // 1. Arrange: GET the page to establish a session and grab the Antiforgery token
-        var getResponse = await _client.GetAsync("/");
-        var html = await getResponse.Content.ReadAsStringAsync();
-
-        var tokenMatch = Regex.Match(html, @"name=""__RequestVerificationToken"" type=""hidden"" value=""([^""]+)""");
-        var token = tokenMatch.Success ? tokenMatch.Groups[1].Value : "";
-
-        var cookies = getResponse.Headers.GetValues("Set-Cookie");
-        _client.DefaultRequestHeaders.Add("Cookie", cookies);
-
-        // Provide a valid markdown payload this time
+        var token = await GetAntiforgeryTokenAsync();
         var content = new FormUrlEncodedContent([
             new KeyValuePair<string, string>("MarkdownText", "# Valid Markdown Test"),
             new KeyValuePair<string, string>("__RequestVerificationToken", token)
         ]);
 
-        // 2. Act: Hit the Generate endpoint
         var generateResponse = await _client.PostAsync("/api/pdf/generate", content);
+        var htmlResponse = await generateResponse.Content.ReadAsStringAsync();
 
-        // 3. Assert (Generation): We expect a 200 OK and an HX-Redirect header
-        generateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        generateResponse.Headers.Contains("HX-Redirect").Should().BeTrue();
+        generateResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        htmlResponse.Should().Contain("hx-trigger=\"every 2s\"");
 
-        // Extract the redirect URL dynamically generated by the server
-        var redirectUrl = generateResponse.Headers.GetValues("HX-Redirect").First();
-        redirectUrl.Should().Contain("/api/pdf/download/");
+        var match = Regex.Match(htmlResponse, @"/api/pdf/status/([a-fA-F0-9\-]+)");
+        match.Success.Should().BeTrue();
+        var jobId = match.Groups[1].Value;
 
-        // ==========================================================
-        // 4. Act: Follow the redirect to test the Download Endpoint
-        // ==========================================================
-        var downloadResponse = await _client.GetAsync(redirectUrl);
+        HttpResponseMessage? statusResponse = null;
+        string? statusHtml = null;
+        for (int i = 0; i < 50; i++)
+        {
+            statusResponse = await _client.GetAsync($"/api/pdf/status/{jobId}");
+            statusHtml = await statusResponse.Content.ReadAsStringAsync();
 
-        // Assert (Download): Ensure the file is served correctly as a PDF
+            // ARCHITECTURAL FIX: Poll until the backend returns the Success UI containing the PDF Ready message
+            if (statusHtml.Contains("PDF Ready"))
+            {
+                break;
+            }
+            await Task.Delay(100);
+        }
+
+        statusHtml.Should().NotBeNull();
+        statusHtml.Should().Contain("PDF Ready");
+
+        // Extract the URL from the invisible iframe src
+        var matchUrl = Regex.Match(statusHtml!, @"<iframe src=""([^""]+)""");
+        matchUrl.Success.Should().BeTrue();
+        var downloadUrl = matchUrl.Groups[1].Value;
+
+        var downloadResponse = await _client.GetAsync(downloadUrl);
+
         downloadResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         downloadResponse.Content.Headers.ContentType?.MediaType.Should().Be("application/pdf");
 
-        // ==========================================================
-        // 5. Act & Assert: The "Sad Path" Download (Expired/Fake ID)
-        // ==========================================================
         var fakeIdUrl = $"/api/pdf/download/{Guid.NewGuid()}";
         var invalidDownloadResponse = await _client.GetAsync(fakeIdUrl);
 
-        // If a user guesses a GUID or their 5-minute cache expires, it must return 404 cleanly
         invalidDownloadResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Get_Status_ShouldReturnProcessingAlert_WhenJobIsPending()
+    {
+        var jobId = Guid.NewGuid();
+
+        var cache = _factory.Services.GetRequiredService<IMemoryCache>();
+        cache.Set(jobId, new PdfJobState(jobId, JobStatus.Pending));
+
+        var response = await _client.GetAsync($"/api/pdf/status/{jobId}");
+        var html = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        html.Should().Contain("Your document is being processed securely");
     }
 }

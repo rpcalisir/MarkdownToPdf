@@ -31,7 +31,6 @@ public sealed class RateLimitingIntegrationTests : IClassFixture<WebApplicationF
         }).CreateClient(clientOptions);
     }
 
-    // DRY PATTERN: Extract token generation to prevent test bloat and duplication
     private async Task<string> GetAntiforgeryTokenAsync()
     {
         var getResponse = await _client.GetAsync("/");
@@ -49,24 +48,22 @@ public sealed class RateLimitingIntegrationTests : IClassFixture<WebApplicationF
     [Fact]
     public async Task Post_GeneratePdf_ShouldReturn429TooManyRequests_WhenLimitExceeded()
     {
-        // 1. Arrange: Establish session and obtain Antiforgery payload
         var token = await GetAntiforgeryTokenAsync();
 
-        // 2. Act: Exhaust the permit limit (configured to 3 in settings)
         for (int i = 0; i < 3; i++)
         {
-            // ARCHITECTURAL FIX: HttpContent streams are consumed upon sending. 
-            // We must instantiate a new payload instance for every request in the loop.
             var validContent = new FormUrlEncodedContent([
                 new KeyValuePair<string, string>("MarkdownText", "# Rate Limit Test"),
                 new KeyValuePair<string, string>("__RequestVerificationToken", token)
             ]);
 
             var validResponse = await _client.PostAsync("/api/pdf/generate", validContent);
-            validResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            // ARCHITECTURAL FIX: Because of the Background Worker Queue, successful initial requests 
+            // now immediately return 202 Accepted instead of 200 OK.
+            validResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
         }
 
-        // The 4th request within the same minute window should trigger the Rate Limiter
         var rateLimitContent = new FormUrlEncodedContent([
             new KeyValuePair<string, string>("MarkdownText", "# Rate Limit Test"),
             new KeyValuePair<string, string>("__RequestVerificationToken", token)
@@ -75,11 +72,9 @@ public sealed class RateLimitingIntegrationTests : IClassFixture<WebApplicationF
         var rateLimitedResponse = await _client.PostAsync("/api/pdf/generate", rateLimitContent);
         var responseString = await rateLimitedResponse.Content.ReadAsStringAsync();
 
-        // 3. Assert: Verify the rejection status and our Razor Component output
         rateLimitedResponse.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
         rateLimitedResponse.Headers.Contains("Retry-After").Should().BeTrue();
 
-        // Verifies the HTMX interceptor receives HTML (Razor Component) and not plain text
         rateLimitedResponse.Content.Headers.ContentType?.MediaType.Should().Be("text/html");
         responseString.Should().Contain("Rate limit exceeded. Please wait one minute");
     }

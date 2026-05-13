@@ -1,10 +1,13 @@
 ﻿using Carter;
 using MediatR;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using MarkdownToPdf.Web.Shared.Constants;
 using MarkdownToPdf.Web.Shared.Http;
 using MarkdownToPdf.Web.Shared.Validation;
+using MarkdownToPdf.Web.Shared.Components;
+using MarkdownToPdf.Web.Features.PdfGeneration.Jobs;
 
 namespace MarkdownToPdf.Web.Features.PdfGeneration.Generate;
 
@@ -16,7 +19,9 @@ public sealed class GeneratePdfEndpoint : ICarterModule
                        .WithTags(Api.Tags.PdfGeneration);
 
         group.MapPost(Api.Routes.PdfGeneration.Generate, HandleGenerateAsync)
-            .RequireRateLimiting("PdfGenerationPolicy"); // Attaches the specific policy
+             .RequireRateLimiting("PdfGenerationPolicy");
+
+        group.MapGet($"{Api.Routes.PdfGeneration.Prefix}/status/{{jobId:guid}}", HandleStatusAsync);
 
         group.MapGet($"{Api.Routes.PdfGeneration.Prefix}/download/{{fileId:guid}}", HandleDownloadAsync);
     }
@@ -24,7 +29,6 @@ public sealed class GeneratePdfEndpoint : ICarterModule
     private static async Task<IResult> HandleGenerateAsync(
         [FromForm] GeneratePdfCommand command,
         [FromServices] ISender sender,
-        [FromServices] IMemoryCache cache,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
@@ -39,24 +43,41 @@ public sealed class GeneratePdfEndpoint : ICarterModule
             return HtmxResults.ErrorAlert(result.Error.Message);
         }
 
-        var fileId = Guid.NewGuid();
-        cache.Set(fileId, result.Value!, TimeSpan.FromMinutes(5));
+        httpContext.Response.StatusCode = StatusCodes.Status202Accepted;
+        return new RazorComponentResult(typeof(ProcessingAlert), new { JobId = result.Value });
+    }
 
-        // NATIVE HTMX DOWNLOAD PATTERN:
-        // HTMX intercepts this header and redirects the client's browser to the download URL.
-        // Because the target URL returns a file, the browser downloads it without refreshing the page.
-        httpContext.Response.Headers.Append("HX-Redirect", $"{Api.Routes.PdfGeneration.Prefix}/download/{fileId}");
+    private static IResult HandleStatusAsync(
+        [FromRoute] Guid jobId,
+        [FromServices] IMemoryCache cache,
+        HttpContext httpContext)
+    {
+        if (!cache.TryGetValue(jobId, out PdfJobState? state) || state is null)
+        {
+            return HtmxResults.ErrorAlert("Your session expired. Please generate the PDF again.");
+        }
 
-        return Results.Ok();
+        // ARCHITECTURAL FIX: Rely entirely on HTMX HTML DOM Swapping.
+        // Swap the spinner for the Success UI containing the hidden iFrame.
+        return state.Status switch
+        {
+            JobStatus.Pending or JobStatus.Processing => new RazorComponentResult(typeof(ProcessingAlert), new { JobId = jobId }),
+
+            JobStatus.Completed => new RazorComponentResult(typeof(DownloadReadyAlert), new { DownloadUrl = $"{Api.Routes.PdfGeneration.Prefix}/download/{jobId}" }),
+
+            JobStatus.Failed => HtmxResults.ErrorAlert(state.ErrorMessage ?? "Failed to generate PDF."),
+
+            _ => HtmxResults.ErrorAlert("Unknown job status.")
+        };
     }
 
     private static IResult HandleDownloadAsync(
         [FromRoute] Guid fileId,
         [FromServices] IMemoryCache cache)
     {
-        if (cache.TryGetValue(fileId, out byte[]? pdfBytes) && pdfBytes is not null)
+        if (cache.TryGetValue(fileId, out PdfJobState? state) && state?.PdfBytes is not null)
         {
-            return Results.File(pdfBytes, "application/pdf", "MarkdownDocument.pdf");
+            return Results.File(state.PdfBytes, "application/pdf", "MarkdownDocument.pdf");
         }
 
         return Results.NotFound("The download link has expired. Please generate the PDF again.");

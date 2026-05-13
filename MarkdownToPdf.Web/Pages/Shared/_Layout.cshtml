@@ -12,12 +12,10 @@
     "Hey, I know this is a 400 error, but please swap this specific error HTML into the page anyway." *@
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/json-enc.js"></script>
-
     <script>
         document.addEventListener('htmx:beforeOnLoad', function (evt) {
-        // Intercept both 400 Bad Request (Validation) and 429 Too Many Requests (Rate Limiting)
+        // Intercept both 400 Bad Request and 429 Too Many Requests
         if (evt.detail.xhr.status === 400 || evt.detail.xhr.status === 429) {
-        // Tell HTMX: "Do not drop this. It contains valid HTML error alerts. Swap it."
         evt.detail.shouldSwap = true;
         evt.detail.isError = false;
         }

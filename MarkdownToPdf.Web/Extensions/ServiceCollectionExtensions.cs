@@ -1,6 +1,7 @@
 ﻿using Carter;
 using FluentValidation;
 using MarkdownToPdf.Web.Features.PdfGeneration;
+using MarkdownToPdf.Web.Features.PdfGeneration.Jobs;
 using MarkdownToPdf.Web.Infrastructure.Database;
 using MarkdownToPdf.Web.Shared.Configuration;
 using MarkdownToPdf.Web.Shared.Http;
@@ -9,7 +10,9 @@ using MarkdownToPdf.Web.Shared.Validation;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Win32;
 using Serilog.Core;
+using System.Collections;
 using System.Threading.RateLimiting;
 
 namespace MarkdownToPdf.Web.Extensions;
@@ -55,6 +58,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Microsoft.AspNetCore.Components.Web.HtmlRenderer>();
         services.AddSingleton<IPdfService, PuppeteerPdfService>();
 
+        // Register the queue as a Singleton and the Worker as a persistent Hosted Service
+        services.AddSingleton<IPdfGenerationQueue, PdfGenerationQueue>();
+        services.AddHostedService<PdfGenerationWorker>();
+
         services.ConfigureRateLimiting(configuration);
 
         return services;
@@ -71,7 +78,14 @@ public static class ServiceCollectionExtensions
 
             options.AddPolicy("PdfGenerationPolicy", context =>
             {
-                var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip";
+                // ENTERPRISE FIX: Safely extract the real client IP even if the app is 
+                // deployed behind Cloudflare, AWS Application Load Balancers, or NGINX.
+                var ipAddress = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+
+                if (string.IsNullOrEmpty(ipAddress))
+                {
+                    ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip";
+                }
 
                 return RateLimitPartition.GetFixedWindowLimiter(ipAddress, _ => new FixedWindowRateLimiterOptions
                 {

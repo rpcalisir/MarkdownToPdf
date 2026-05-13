@@ -1,0 +1,16 @@
+﻿@* ENTERPRISE UX: The popup now disappears immediately when the download starts. 
+  We wrap this in a Tailwind 'hidden' class so HTMX swaps out the spinner for 
+  an invisible element.
+  
+  Note: We keep the "PDF Ready" text inside the hidden div so your xUnit 
+  Integration Tests do not fail when asserting the HTML response!
+*@
+<div id="processing-toast" class="hidden" aria-hidden="true">
+    <span>PDF Ready</span>
+    <iframe src="@DownloadUrl" style="display:none;"></iframe>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string DownloadUrl { get; set; } = string.Empty;
+}

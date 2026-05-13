@@ -1,72 +1,36 @@
-﻿using Markdig;
-using MediatR;
-using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.Components.Web;
+﻿using MarkdownToPdf.Web.Features.PdfGeneration.Jobs;
 using MarkdownToPdf.Web.Shared.Constants;
 using MarkdownToPdf.Web.Shared.Core;
-using MarkdownToPdf.Web.Features.PdfGeneration.Generate.Templates;
+using MediatR;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace MarkdownToPdf.Web.Features.PdfGeneration.Generate;
 
 public sealed class GeneratePdfHandler(
-    HtmlRenderer htmlRenderer,
-    IWebHostEnvironment env,
-    IPdfService pdfService) // Inject the interface, not the concrete class!
-    : IRequestHandler<GeneratePdfCommand, Result<byte[]>>
+    IPdfGenerationQueue queue,
+    IMemoryCache cache)
+    : IRequestHandler<GeneratePdfCommand, Result<Guid>>
 {
-    private static readonly MarkdownPipeline _pipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .DisableHtml()
-        .Build();
-
-    private static string? _cachedCss;
-    private static readonly SemaphoreSlim _cssLock = new(1, 1);
-
-    public async Task<Result<byte[]>> Handle(GeneratePdfCommand request, CancellationToken cancellationToken)
+    public async Task<Result<Guid>> Handle(GeneratePdfCommand request, CancellationToken cancellationToken)
     {
         try
         {
-            // Double-Check Locking pattern for thread-safe lazy loading
-            if (_cachedCss is null)
-            {
-                await _cssLock.WaitAsync(cancellationToken);
-                try
-                {
-                    if (_cachedCss is null)
-                    {
-                        var cssPath = Path.Combine(env.WebRootPath, "css", "pdf-styles.css");
-                        _cachedCss = await File.ReadAllTextAsync(cssPath, cancellationToken);
-                    }
-                }
-                finally
-                {
-                    _cssLock.Release();
-                }
-            }
+            var jobId = Guid.NewGuid();
 
-            var rawHtmlContent = Markdown.ToHtml(request.MarkdownText!, _pipeline);
+            // Initialize the job state so the polling endpoint immediately recognizes it
+            var initialState = new PdfJobState(jobId, JobStatus.Pending);
+            cache.Set(jobId, initialState, TimeSpan.FromMinutes(5));
 
-            var fullHtmlDocument = await htmlRenderer.Dispatcher.InvokeAsync(async () =>
-            {
-                var dictionary = new Dictionary<string, object?>
-                {
-                    { nameof(PdfDocumentTemplate.CssStyles), _cachedCss },
-                    { nameof(PdfDocumentTemplate.ParsedHtmlContent), rawHtmlContent }
-                };
-                var parameters = ParameterView.FromDictionary(dictionary);
-                var output = await htmlRenderer.RenderComponentAsync<PdfDocumentTemplate>(parameters);
+            var job = new PdfGenerationJob(jobId, request.MarkdownText!);
 
-                return output.ToHtmlString();
-            });
+            // Instantly offload the heavy work to the Background Channel
+            await queue.QueueJobAsync(job, cancellationToken);
 
-            // Delegate the heavy lifting to the Infrastructure service
-            var pdfBytes = await pdfService.GenerateFromHtmlAsync(fullHtmlDocument, cancellationToken);
-
-            return Result<byte[]>.Success(pdfBytes);
+            return Result<Guid>.Success(jobId);
         }
         catch (Exception)
         {
-            return Result<byte[]>.Failure(DomainErrors.PdfGeneration.FailedToGenerate);
+            return Result<Guid>.Failure(DomainErrors.PdfGeneration.FailedToGenerate);
         }
     }
 }
