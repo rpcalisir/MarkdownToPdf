@@ -1,0 +1,22 @@
+﻿@* Features/PdfGeneration/Generate/Templates/DownloadAlert.razor *@
+@using MarkdownToPdf.Web.Shared.Constants
+
+<div class="mt-4 p-8 bg-white shadow-lg text-gray-800 rounded-xl border border-gray-200 flex flex-col items-center gap-6 w-full animate-fade-in">
+    <div class="rounded-full bg-green-100 p-3">
+        <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+    </div>
+    
+    <p class="font-bold text-xl text-gray-900">@Api.Messages.PdfGeneratedSuccess</p>
+    
+    <a href="/api/pdf/download/@FileId"
+           download="MarkdownDocument.pdf"
+           onclick="window.location.href = this.href; return false;"
+           class="w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg transition duration-200 shadow-md">
+        Download PDF Document
+    </a>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public required Guid FileId { get; set; }
+}

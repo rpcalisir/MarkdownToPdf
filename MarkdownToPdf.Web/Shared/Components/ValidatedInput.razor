@@ -1,0 +1,25 @@
+﻿<div class="mb-4 w-full">
+    <label class="block text-sm font-medium text-gray-700">@Label</label>
+    
+    <input type="@Type"
+           name="@Name"
+           required
+           hx-post="@ValidationEndpoint"
+           hx-trigger="blur"
+           hx-include="closest form"
+           hx-ext="response-targets"
+           hx-target="#error-@Name"
+           hx-target-400="#error-@Name"
+           class="mt-1 block w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+           placeholder="@Placeholder" />
+           
+    <div id="error-@Name" class="text-sm text-red-600 font-medium mt-1 empty:hidden"></div>
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Type { get; set; } = "text";
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = string.Empty;
+    [Parameter] public string ValidationEndpoint { get; set; } = string.Empty;
+}

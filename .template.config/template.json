@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Your Name",
+  "classifications": ["Web", "WebAPI", "HTMX"],
+  "name": "Enterprise VSA Boilerplate",
+  "identity": "MarkdownToPdf.Template",
+  "shortName": "vsa-htmx",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "MarkdownToPdf",
+  "preferNameDirectory": true,
+  "sources": [
+    {
+      "exclude": [
+        "**/.git/**",
+        "**/.vs/**",
+        "**/bin/**",
+        "**/obj/**"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mega Boilerplate</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    @* HTMX realized developers hated faking 200 OKs, so they created the response-targets extension. 
+    This extension allows us to use the correct HTTP status code (400 Bad Request) and explicitly tell HTMX, 
+    "Hey, I know this is a 400 error, but please swap this specific error HTML into the page anyway." *@
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/json-enc.js"></script>
+
+    <script>
+        document.addEventListener('htmx:beforeOnLoad', function (evt) {
+        // Intercept 400 Bad Request responses (Validation Errors)
+        if (evt.detail.xhr.status === 400) {
+        // Tell HTMX: "Do not drop this. It contains valid HTML error alerts. Swap it."
+        evt.detail.shouldSwap = true;
+        evt.detail.isError = false;
+        }
+        });
+    </script>
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans antialiased">
+    
+    <nav class="bg-white shadow-sm w-full p-4 flex justify-between items-center">
+        <a href="/" class="text-xl font-bold text-blue-600">MarkdownToPdf</a>
+        <div>
+            <a href="/auth/register" class="text-gray-600 hover:text-blue-600 font-semibold">Register</a>
+        </div>
+    </nav>
+
+    <main class="min-h-[calc(100vh-80px)] flex items-center justify-center p-6">
+        @RenderBody()
+    </main>
+
+</body>
+</html>
+

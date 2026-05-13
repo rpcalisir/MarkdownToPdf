@@ -1,0 +1,48 @@
+﻿@page
+@{
+    ViewData["Title"] = "Markdown to PDF";
+}
+
+<div id="toast-container" class="fixed top-4 right-4 z-50 w-96"></div>
+
+<form class="flex flex-col h-[calc(100vh-80px)]"
+      hx-post="/api/pdf/generate"
+      hx-target="#toast-container">
+    
+    @Html.AntiForgeryToken()
+
+    <div class="bg-gray-800 text-white px-6 py-4 flex justify-between items-center shadow-md z-10">
+        <div>
+            <h1 class="text-xl font-bold tracking-wider">Markdown to PDF</h1>
+            <p class="text-xs text-gray-400 mt-1">Live preview enabled. GitHub-flavoured styling.</p>
+        </div>
+        <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-md shadow-lg transition duration-200 flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            <span>Download PDF</span>
+        </button>
+    </div>
+
+    <div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-gray-100">
+        
+        <div class="flex-1 flex flex-col border-r border-gray-300">
+            <div class="bg-gray-200 px-4 py-2 text-xs font-bold text-gray-600 uppercase tracking-widest border-b border-gray-300">
+                Editor
+            </div>
+            <textarea name="MarkdownText"
+                      hx-post="/api/pdf/preview"
+                      hx-trigger="keyup changed delay:300ms"
+                      hx-target="#preview-pane"
+                      class="flex-1 w-full p-6 resize-none focus:outline-none font-mono text-sm text-gray-800 bg-white"
+                      placeholder="# Type your markdown here..."></textarea>
+        </div>
+
+        <div class="flex-1 flex flex-col">
+            <div class="bg-gray-200 px-4 py-2 text-xs font-bold text-gray-600 uppercase tracking-widest border-b border-gray-300">
+                Live Preview
+            </div>
+            <div id="preview-pane" class="flex-1 p-8 overflow-y-auto bg-white">
+                <div class="text-gray-400 text-center mt-10">Start typing to see your live preview...</div>
+            </div>
+        </div>
+    </div>
+</form>

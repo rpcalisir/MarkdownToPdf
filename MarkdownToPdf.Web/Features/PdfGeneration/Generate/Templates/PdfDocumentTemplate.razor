@@ -1,0 +1,21 @@
+﻿@* Features/PdfGeneration/Generate/Templates/PdfDocumentTemplate.razor *@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <style>
+            @((MarkupString)CssStyles)
+    </style>
+</head>
+<body>
+    @((MarkupString)ParsedHtmlContent)
+</body>
+</html>
+
+@code {
+    [Parameter, EditorRequired]
+    public required string CssStyles { get; set; }
+
+    [Parameter, EditorRequired]
+    public required string ParsedHtmlContent { get; set; }
+}
