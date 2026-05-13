@@ -62,16 +62,22 @@ blockquote {
 pre {
     padding: 1.25em;
     margin: 1.5em 0;
-    overflow: auto;
-    background-color: var(--code-bg); /* Dark background */
-    color: var(--code-text); /* Light text */
+    background-color: var(--code-bg);
+    color: var(--code-text);
     border-radius: 8px;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    /* ENTERPRISE FIX: Force text wrapping so it doesn't blow out Flexbox or get cut off the PDF */
+    white-space: pre-wrap; /* CSS 3 */
+    white-space: -moz-pre-wrap; /* Mozilla */
+    word-wrap: break-word; /* IE */
+    overflow-x: hidden; /* Disable horizontal scroll completely */
 }
 
 code {
     font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
     font-size: 0.9em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 /* Inline code specifically (don't make it dark, just a soft gray) */
