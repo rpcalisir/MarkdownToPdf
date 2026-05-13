@@ -1,5 +1,7 @@
 ﻿using FluentAssertions;
+using MarkdownToPdf.Web.Features.PdfGeneration;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Text.RegularExpressions;
 using Xunit;
@@ -12,7 +14,24 @@ public sealed class GeneratePdfIntegrationTests : IClassFixture<WebApplicationFa
 
     public GeneratePdfIntegrationTests(WebApplicationFactory<Program> factory)
     {
-        _client = factory.CreateClient();
+        // 2. Intercept the WebApplicationFactory to swap out the real service with the Fake
+        var clientOptions = new WebApplicationFactoryClientOptions { AllowAutoRedirect = false };
+
+        _client = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                // Find the existing Puppeteer registration and remove it
+                var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IPdfService));
+                if (descriptor != null)
+                {
+                    services.Remove(descriptor);
+                }
+
+                // Inject our lightning-fast fake
+                services.AddSingleton<IPdfService, FakePdfService>();
+            });
+        }).CreateClient(clientOptions);
     }
 
     [Fact]

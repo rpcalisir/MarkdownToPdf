@@ -1,5 +1,6 @@
 ﻿using Carter;
 using FluentValidation;
+using MarkdownToPdf.Web.Features.PdfGeneration;
 using MarkdownToPdf.Web.Infrastructure.Database;
 using MarkdownToPdf.Web.Shared.Logging;
 using MarkdownToPdf.Web.Shared.Validation;
@@ -80,6 +81,9 @@ public static class ServiceCollectionExtensions
         // 
         services.AddMemoryCache();
         services.AddScoped<Microsoft.AspNetCore.Components.Web.HtmlRenderer>();
+
+        // Register the heavy infrastructure as a Singleton so the browser stays warm across all requests
+        services.AddSingleton<IPdfService, PuppeteerPdfService>();
 
         return services;
     }
