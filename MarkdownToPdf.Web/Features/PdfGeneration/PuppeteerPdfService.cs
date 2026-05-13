@@ -34,7 +34,6 @@ internal sealed class PuppeteerPdfService : IPdfService
 
         await using var page = await _browser.NewPageAsync();
         await page.SetJavaScriptEnabledAsync(false);
-
         await page.SetContentAsync(htmlDocument, new NavigationOptions { WaitUntil = [WaitUntilNavigation.Networkidle0] });
 
         var pdfBytes = await page.PdfDataAsync(new PdfOptions
@@ -47,4 +46,16 @@ internal sealed class PuppeteerPdfService : IPdfService
 
         return pdfBytes;
     }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_browser is not null && !_browser.IsClosed)
+        {
+            await _browser.CloseAsync();
+            await _browser.DisposeAsync();
+        }
+
+        _lock.Dispose();
+    }
+
 }

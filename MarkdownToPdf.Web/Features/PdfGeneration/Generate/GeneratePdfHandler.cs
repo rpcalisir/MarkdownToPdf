@@ -20,15 +20,28 @@ public sealed class GeneratePdfHandler(
         .Build();
 
     private static string? _cachedCss;
+    private static readonly SemaphoreSlim _cssLock = new(1, 1);
 
     public async Task<Result<byte[]>> Handle(GeneratePdfCommand request, CancellationToken cancellationToken)
     {
         try
         {
+            // Double-Check Locking pattern for thread-safe lazy loading
             if (_cachedCss is null)
             {
-                var cssPath = Path.Combine(env.WebRootPath, "css", "pdf-styles.css");
-                _cachedCss = await File.ReadAllTextAsync(cssPath, cancellationToken);
+                await _cssLock.WaitAsync(cancellationToken);
+                try
+                {
+                    if (_cachedCss is null)
+                    {
+                        var cssPath = Path.Combine(env.WebRootPath, "css", "pdf-styles.css");
+                        _cachedCss = await File.ReadAllTextAsync(cssPath, cancellationToken);
+                    }
+                }
+                finally
+                {
+                    _cssLock.Release();
+                }
             }
 
             var rawHtmlContent = Markdown.ToHtml(request.MarkdownText!, _pipeline);
