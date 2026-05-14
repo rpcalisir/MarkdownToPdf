@@ -1,8 +1,9 @@
 ﻿using Markdig;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Distributed;
 using MarkdownToPdf.Web.Features.PdfGeneration.Generate.Templates;
+using System.Text.Json;
 
 namespace MarkdownToPdf.Web.Features.PdfGeneration.Jobs;
 
@@ -10,7 +11,7 @@ public sealed class PdfGenerationWorker : BackgroundService
 {
     private readonly IPdfGenerationQueue _queue;
     private readonly IServiceScopeFactory _serviceScopeFactory;
-    private readonly IMemoryCache _cache;
+    private readonly IDistributedCache _cache;
     private readonly ILogger<PdfGenerationWorker> _logger;
 
     private static readonly MarkdownPipeline _pipeline = new MarkdownPipelineBuilder()
@@ -24,7 +25,7 @@ public sealed class PdfGenerationWorker : BackgroundService
     public PdfGenerationWorker(
         IPdfGenerationQueue queue,
         IServiceScopeFactory serviceScopeFactory,
-        IMemoryCache cache,
+        IDistributedCache cache,
         ILogger<PdfGenerationWorker> logger)
     {
         _queue = queue;
@@ -35,19 +36,11 @@ public sealed class PdfGenerationWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // PERFORMANCE FIX: Bounded parallelism prevents a single slow PDF from blocking the queue.
-        // It simultaneously protects the host machine by restricting concurrent browser pages to logical cores.
-        var parallelOptions = new ParallelOptions
-        {
-            MaxDegreeOfParallelism = Environment.ProcessorCount,
-            CancellationToken = stoppingToken
-        };
-
-        await Parallel.ForEachAsync(_queue.ReadAllAsync(stoppingToken), parallelOptions, async (job, token) =>
+        await foreach (var job in _queue.ReadAllAsync(stoppingToken))
         {
             try
             {
-                UpdateJobState(job.JobId, JobStatus.Processing);
+                await UpdateJobStateAsync(job.JobId, JobStatus.Processing, token: stoppingToken);
 
                 // ENTERPRISE FIX: Use CreateAsyncScope() instead of CreateScope().
                 // HtmlRenderer implements IAsyncDisposable. Ensuring it is disposed asynchronously 
@@ -60,13 +53,13 @@ public sealed class PdfGenerationWorker : BackgroundService
 
                 if (_cachedCss is null)
                 {
-                    await _cssLock.WaitAsync(token);
+                    await _cssLock.WaitAsync(stoppingToken);
                     try
                     {
                         if (_cachedCss is null)
                         {
                             var cssPath = Path.Combine(env.WebRootPath, "css", "pdf-styles.css");
-                            _cachedCss = await File.ReadAllTextAsync(cssPath, token);
+                            _cachedCss = await File.ReadAllTextAsync(cssPath, stoppingToken);
                         }
                     }
                     finally
@@ -91,24 +84,29 @@ public sealed class PdfGenerationWorker : BackgroundService
                 });
 
                 // Delegate the heavy OS process to the infrastructure service
-                var pdfBytes = await pdfService.GenerateFromHtmlAsync(fullHtmlDocument, token);
+                var pdfBytes = await pdfService.GenerateFromHtmlAsync(fullHtmlDocument, stoppingToken);
 
-                UpdateJobState(job.JobId, JobStatus.Completed, pdfBytes);
+                await UpdateJobStateAsync(job.JobId, JobStatus.Completed, pdfBytes, token: stoppingToken);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to process PDF job {JobId}", job.JobId);
-                UpdateJobState(job.JobId, JobStatus.Failed, errorMessage: "An error occurred while generating the document.");
+                await UpdateJobStateAsync(job.JobId, JobStatus.Failed, errorMessage: "An error occurred while generating the document.", token: stoppingToken);
             }
-        });
+        }
     }
 
-    private void UpdateJobState(Guid jobId, JobStatus status, byte[]? pdfBytes = null, string? errorMessage = null)
+    private async Task UpdateJobStateAsync(Guid jobId, JobStatus status, byte[]? pdfBytes = null, string? errorMessage = null, CancellationToken token = default)
     {
         var state = new PdfJobState(jobId, status, pdfBytes, errorMessage);
+        var stateJson = JsonSerializer.Serialize(state);
 
-        // ARCHITECTURAL NOTE: For multi-node deployments, replace this IMemoryCache call 
-        // with IDistributedCache so HTMX status polls can hit any server instance.
-        _cache.Set(jobId, state, TimeSpan.FromMinutes(5));
+        // ARCHITECTURAL NOTE: For multi-node deployments, IDistributedCache ensures 
+        // HTMX status polls can hit any server instance behind the load balancer.
+        await _cache.SetStringAsync(
+            jobId.ToString(),
+            stateJson,
+            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5) },
+            token);
     }
 }

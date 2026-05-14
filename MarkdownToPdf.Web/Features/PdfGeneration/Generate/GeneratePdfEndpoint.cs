@@ -4,12 +4,13 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Distributed;
 using MarkdownToPdf.Web.Shared.Constants;
 using MarkdownToPdf.Web.Shared.Http;
 using MarkdownToPdf.Web.Shared.Validation;
 using MarkdownToPdf.Web.Shared.Components;
 using MarkdownToPdf.Web.Features.PdfGeneration.Jobs;
+using System.Text.Json;
 
 namespace MarkdownToPdf.Web.Features.PdfGeneration.Generate;
 
@@ -52,15 +53,21 @@ public sealed class GeneratePdfEndpoint : ICarterModule
         return new RazorComponentResult(typeof(ProcessingAlert), new { JobId = result.Value });
     }
 
-    private static IResult HandleStatusAsync(
+    private static async Task<IResult> HandleStatusAsync(
         [FromRoute] Guid jobId,
-        [FromServices] IMemoryCache cache,
-        HttpContext httpContext)
+        [FromServices] IDistributedCache cache,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
     {
-        if (!cache.TryGetValue(jobId, out PdfJobState? state) || state is null)
+        var stateJson = await cache.GetStringAsync(jobId.ToString(), cancellationToken);
+
+        if (string.IsNullOrEmpty(stateJson))
         {
             return HtmxResults.ErrorAlert("Your session expired. Please generate the PDF again.");
         }
+
+        var state = JsonSerializer.Deserialize<PdfJobState>(stateJson);
+        if (state is null) return HtmxResults.ErrorAlert("Failed to read job state.");
 
         // ARCHITECTURAL FIX: Rely entirely on HTMX HTML DOM Swapping.
         // Swap the spinner for the Success UI containing the hidden iFrame.
@@ -76,13 +83,20 @@ public sealed class GeneratePdfEndpoint : ICarterModule
         };
     }
 
-    private static IResult HandleDownloadAsync(
+    private static async Task<IResult> HandleDownloadAsync(
         [FromRoute] Guid fileId,
-        [FromServices] IMemoryCache cache)
+        [FromServices] IDistributedCache cache,
+        CancellationToken cancellationToken)
     {
-        if (cache.TryGetValue(fileId, out PdfJobState? state) && state?.PdfBytes is not null)
+        var stateJson = await cache.GetStringAsync(fileId.ToString(), cancellationToken);
+
+        if (!string.IsNullOrEmpty(stateJson))
         {
-            return Results.File(state.PdfBytes, "application/pdf", "MarkdownDocument.pdf");
+            var state = JsonSerializer.Deserialize<PdfJobState>(stateJson);
+            if (state?.PdfBytes is not null)
+            {
+                return Results.File(state.PdfBytes, "application/pdf", "MarkdownDocument.pdf");
+            }
         }
 
         return Results.NotFound("The download link has expired. Please generate the PDF again.");

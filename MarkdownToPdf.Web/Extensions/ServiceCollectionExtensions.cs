@@ -55,7 +55,10 @@ public static class ServiceCollectionExtensions
         .AddEntityFrameworkStores<AppDbContext>()
         .AddDefaultTokenProviders();
 
-        services.AddMemoryCache();
+        // SCALABILITY FIX: Migrated from IMemoryCache to IDistributedCache.
+        // AddDistributedMemoryCache acts as a local fallback for development and testing. 
+        // For production, swap this to services.AddStackExchangeRedisCache(...) to enable multi-node scaling.
+        services.AddDistributedMemoryCache();
 
         services.AddScoped<Microsoft.AspNetCore.Components.Web.HtmlRenderer>();
         services.AddSingleton<IPdfService, PuppeteerPdfService>();

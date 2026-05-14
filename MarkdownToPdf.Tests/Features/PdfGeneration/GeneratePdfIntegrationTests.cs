@@ -2,9 +2,10 @@
 using MarkdownToPdf.Web.Features.PdfGeneration;
 using MarkdownToPdf.Web.Features.PdfGeneration.Jobs;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Xunit;
 
@@ -54,6 +55,7 @@ public sealed class GeneratePdfIntegrationTests : IClassFixture<WebApplicationFa
     public async Task Post_GeneratePdf_ShouldReturnHtmlToast_WhenValidationFails()
     {
         var token = await GetAntiforgeryTokenAsync();
+
         var content = new FormUrlEncodedContent([
             new KeyValuePair<string, string>("MarkdownText", ""),
             new KeyValuePair<string, string>("__RequestVerificationToken", token)
@@ -71,6 +73,7 @@ public sealed class GeneratePdfIntegrationTests : IClassFixture<WebApplicationFa
     public async Task Post_GeneratePdf_ShouldReturnAcceptedAndPollUntilDownloadIframeIsRendered_WhenMarkdownIsValid()
     {
         var token = await GetAntiforgeryTokenAsync();
+
         var content = new FormUrlEncodedContent([
             new KeyValuePair<string, string>("MarkdownText", "# Valid Markdown Test"),
             new KeyValuePair<string, string>("__RequestVerificationToken", token)
@@ -88,6 +91,7 @@ public sealed class GeneratePdfIntegrationTests : IClassFixture<WebApplicationFa
 
         HttpResponseMessage? statusResponse = null;
         string? statusHtml = null;
+
         for (int i = 0; i < 50; i++)
         {
             statusResponse = await _client.GetAsync($"/api/pdf/status/{jobId}");
@@ -125,8 +129,10 @@ public sealed class GeneratePdfIntegrationTests : IClassFixture<WebApplicationFa
     {
         var jobId = Guid.NewGuid();
 
-        var cache = _factory.Services.GetRequiredService<IMemoryCache>();
-        cache.Set(jobId, new PdfJobState(jobId, JobStatus.Pending));
+        // TEST FIX: Switched from IMemoryCache to IDistributedCache to match Step 3 architecture.
+        var cache = _factory.Services.GetRequiredService<IDistributedCache>();
+        var stateJson = JsonSerializer.Serialize(new PdfJobState(jobId, JobStatus.Pending));
+        await cache.SetStringAsync(jobId.ToString(), stateJson);
 
         var response = await _client.GetAsync($"/api/pdf/status/{jobId}");
         var html = await response.Content.ReadAsStringAsync();
