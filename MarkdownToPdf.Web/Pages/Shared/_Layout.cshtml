@@ -6,14 +6,15 @@
     <title>@ViewData["Title"] - MarkdownToPdf</title>
 
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/json-enc.js"></script>
-    
-    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/response-targets.js"></script>
+
+    <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>
+
+    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/json-enc.js" integrity="sha384-nRnAvEUI7N/XvvowiMiq7oEI04gOXMCqD3Bidvedw+YNbj7zTQACPlRI3Jt3vYM4" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/response-targets.js" integrity="sha384-mjA0hyKXySNX/PSU4NPxkE/KF/h3O7wna7tTl7T8m+8lJDMxZ3PtXLWlHtabV47t" crossorigin="anonymous"></script>
 </head>
 
 <body class="bg-gray-50 text-gray-900 font-sans antialiased flex flex-col h-screen overflow-hidden" hx-ext="response-targets">
-    
+
     <main class="flex-1 w-full h-full overflow-hidden">
         @RenderBody()
     </main>
