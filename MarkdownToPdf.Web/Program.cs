@@ -1,5 +1,6 @@
 using Carter;
 using MarkdownToPdf.Web.Extensions;
+using MarkdownToPdf.Web.Shared.Exceptions;
 using Serilog;
 using System.Reflection;
 
@@ -15,11 +16,18 @@ builder.Services.AddSerilog((services, configuration) => configuration
     .ReadFrom.Services(services)
     .Enrich.FromLogContext());
 
+// Register the HTMX-aware global exception handler
+builder.Services.AddExceptionHandler<HtmxGlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+
 builder.Services.AddEnterpriseInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
 app.UseSerilogRequestLogging();
+
+// Activate the middleware globally so it catches all errors
+app.UseExceptionHandler();
 
 if (!app.Environment.IsDevelopment())
 {

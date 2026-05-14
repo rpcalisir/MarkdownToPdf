@@ -1,6 +1,6 @@
-﻿using System.Threading.Channels;
+﻿namespace MarkdownToPdf.Web.Features.PdfGeneration.Jobs;
 
-namespace MarkdownToPdf.Web.Features.PdfGeneration.Jobs;
+using System.Threading.Channels;
 
 internal sealed class PdfGenerationQueue : IPdfGenerationQueue
 {
@@ -8,20 +8,28 @@ internal sealed class PdfGenerationQueue : IPdfGenerationQueue
 
     public PdfGenerationQueue()
     {
-        // PERFORMANCE FIX: Changed FullMode from Wait to DropWrite. 
-        // If the queue exceeds capacity during a traffic spike, DropWrite instantly discards 
-        // the new job rather than blocking the Minimal API thread, completely preventing thread pool starvation.
+        // PERFORMANCE & RELIABILITY FIX: Reverted from DropWrite to Wait.
+        // We handle the bounds-checking manually to fail-fast and reject the request 
+        // gracefully rather than silently dropping data while the client polls forever.
         var options = new BoundedChannelOptions(100)
         {
-            FullMode = BoundedChannelFullMode.DropWrite
+            FullMode = BoundedChannelFullMode.Wait
         };
 
         _queue = Channel.CreateBounded<PdfGenerationJob>(options);
     }
 
-    public async ValueTask QueueJobAsync(PdfGenerationJob job, CancellationToken cancellationToken)
+    public ValueTask QueueJobAsync(PdfGenerationJob job, CancellationToken cancellationToken)
     {
-        await _queue.Writer.WriteAsync(job, cancellationToken);
+        // Load Shedding: If the system is saturated, TryWrite returns false immediately.
+        // We throw an exception which will be caught by the MediatR pipeline or global error handler
+        // to return a failure result to the UI.
+        if (!_queue.Writer.TryWrite(job))
+        {
+            throw new InvalidOperationException("The document processing queue is currently at maximum capacity. Please try again later.");
+        }
+
+        return ValueTask.CompletedTask;
     }
 
     public IAsyncEnumerable<PdfGenerationJob> ReadAllAsync(CancellationToken cancellationToken)
