@@ -7,12 +7,12 @@ using MarkdownToPdf.Web.Shared.Configuration;
 using MarkdownToPdf.Web.Shared.Http;
 using MarkdownToPdf.Web.Shared.Logging;
 using MarkdownToPdf.Web.Shared.Validation;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Win32;
 using Serilog.Core;
-using System.Collections;
 using System.Threading.RateLimiting;
 
 namespace MarkdownToPdf.Web.Extensions;
@@ -69,52 +69,83 @@ public static class ServiceCollectionExtensions
 
     private static IServiceCollection ConfigureRateLimiting(this IServiceCollection services, IConfiguration configuration)
     {
-        var rateLimitConfig = new RateLimitingSettings();
-        configuration.GetSection(RateLimitingSettings.SectionName).Bind(rateLimitConfig);
+        // Register our custom policy handler so DI can resolve it
+        services.AddSingleton<PdfGenerationRateLimiterPolicy>();
 
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-
-            options.AddPolicy("PdfGenerationPolicy", context =>
-            {
-                // ENTERPRISE FIX: Safely extract the real client IP even if the app is 
-                // deployed behind Cloudflare, AWS Application Load Balancers, or NGINX.
-                var ipAddress = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
-
-                if (string.IsNullOrEmpty(ipAddress))
-                {
-                    ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip";
-                }
-
-                return RateLimitPartition.GetFixedWindowLimiter(ipAddress, _ => new FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = rateLimitConfig.PermitLimit,
-                    Window = TimeSpan.FromSeconds(rateLimitConfig.WindowSeconds),
-                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                    QueueLimit = 0
-                });
-            });
-
-            options.OnRejected = async (context, cancellationToken) =>
-            {
-                context.HttpContext.Response.Headers.RetryAfter = rateLimitConfig.WindowSeconds.ToString();
-
-                // ARCHITECTURAL FIX: Our shared 'HtmxResults.ErrorAlert' factory internally forces a 400 Bad Request status code.
-                // When the Rate Limiter executes it, it silently overwrites the 429 status code back to 400, breaking the HTTP contract.
-                // We bypass the factory and explicitly instantiate the RazorComponentResult, binding it to the 429 status.
-                var result = new RazorComponentResult(
-                    typeof(MarkdownToPdf.Web.Shared.Components.ErrorAlert),
-                    new { Errors = new List<string> { "Rate limit exceeded. Please wait one minute before generating another PDF." } }
-                )
-                {
-                    StatusCode = StatusCodes.Status429TooManyRequests
-                };
-
-                await result.ExecuteAsync(context.HttpContext);
-            };
+            options.AddPolicy<string, PdfGenerationRateLimiterPolicy>("PdfGenerationPolicy");
         });
 
         return services;
+    }
+}
+
+// ARCHITECTURAL FIX: IRateLimiterPolicy requires a synchronous GetPartition method.
+// To bypass rate limiting based on the request body, we must explicitly enable 
+// synchronous IO for this specific pipeline execution. This allows us to peek at 
+// the 'MarkdownText' field and return a NoLimiter partition for empty submissions, 
+// letting MediatR naturally handle the 400 Validation Error via HTMX.
+public class PdfGenerationRateLimiterPolicy : IRateLimiterPolicy<string>
+{
+    private readonly RateLimitingSettings _settings;
+
+    public PdfGenerationRateLimiterPolicy(IConfiguration configuration)
+    {
+        _settings = new RateLimitingSettings();
+        configuration.GetSection(RateLimitingSettings.SectionName).Bind(_settings);
+
+        OnRejected = async (context, cancellationToken) =>
+        {
+            context.HttpContext.Response.Headers.RetryAfter = _settings.WindowSeconds.ToString();
+
+            var result = new RazorComponentResult(
+                typeof(MarkdownToPdf.Web.Shared.Components.ErrorAlert),
+                new { Errors = new List<string> { "You've reached your request limit. Please wait 60 seconds before trying again." } }
+            )
+            {
+                StatusCode = StatusCodes.Status429TooManyRequests
+            };
+
+            await result.ExecuteAsync(context.HttpContext);
+        };
+    }
+
+    public Func<OnRejectedContext, CancellationToken, ValueTask>? OnRejected { get; }
+
+    public RateLimitPartition<string> GetPartition(HttpContext httpContext)
+    {
+        var forwardedFor = httpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+        var ipAddress = string.IsNullOrWhiteSpace(forwardedFor)
+            ? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip"
+            : forwardedFor;
+
+        // Bypassing rate limiting if the MarkdownText is empty.
+        // Since GetPartition is synchronous, we explicitly enable Sync IO to safely peek at the form payload.
+        var syncIoFeature = httpContext.Features.Get<IHttpBodyControlFeature>();
+        if (syncIoFeature != null)
+        {
+            syncIoFeature.AllowSynchronousIO = true;
+        }
+
+        if (httpContext.Request.HasFormContentType)
+        {
+            // This safely caches the parsed form for downstream Minimal API model binding
+            var form = httpContext.Request.Form;
+
+            if (!form.TryGetValue("MarkdownText", out var text) || string.IsNullOrWhiteSpace(text))
+            {
+                return RateLimitPartition.GetNoLimiter("bypass_" + ipAddress);
+            }
+        }
+
+        return RateLimitPartition.GetFixedWindowLimiter(ipAddress, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = _settings.PermitLimit,
+            Window = TimeSpan.FromSeconds(_settings.WindowSeconds),
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        });
     }
 }

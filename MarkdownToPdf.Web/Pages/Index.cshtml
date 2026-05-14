@@ -3,62 +3,51 @@
     ViewData["Title"] = "Markdown to PDF";
 }
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-
 <div id="toast-container" class="fixed top-4 right-4 z-50 w-96"></div>
 
-<form class="flex flex-col h-[calc(100vh-80px)]"
+<form class="flex flex-col w-full h-full"
       hx-post="/api/pdf/generate"
-      hx-target="#toast-container">
+      hx-target="#toast-container"
+      hx-target-400="#toast-container"
+      hx-target-429="#toast-container">
     
     @Html.AntiForgeryToken()
 
-    <div class="bg-gray-800 text-white px-6 py-4 flex justify-between items-center shadow-md z-10">
+    <div class="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-8 py-6 flex-none flex justify-between items-center shadow-lg border-b border-slate-700 z-10">
         <div>
-            <h1 class="text-xl font-bold tracking-wider">Markdown to PDF</h1>
-            <p class="text-xs text-gray-400 mt-1">Live preview enabled. GitHub-flavoured styling.</p>
+            <h1 class="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-300">Markdown to PDF</h1>
+            <p class="text-sm text-slate-300 mt-2 font-medium">Live preview enabled. GitHub-flavoured styling.</p>
         </div>
-        <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-md shadow-lg transition duration-200 flex items-center gap-2">
+        <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-6 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 transform hover:-translate-y-0.5 flex items-center gap-2">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
             <span>Download PDF</span>
         </button>
     </div>
 
-    <div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-gray-100">
+    <div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-slate-50 w-full">
         
-        <div class="flex-1 flex flex-col border-r border-gray-300 min-w-0">
-            <div class="bg-gray-200 px-4 py-2 text-xs font-bold text-gray-600 uppercase tracking-widest border-b border-gray-300">
+        <div class="flex-1 flex flex-col border-r border-slate-200 min-w-0 shadow-inner w-full h-full">
+            <div class="bg-slate-100 px-6 py-3 text-sm font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 flex items-center shadow-sm flex-none">
                 Editor
             </div>
             <textarea name="MarkdownText"
                       hx-post="/api/pdf/preview"
                       hx-trigger="keyup changed delay:300ms"
                       hx-target="#preview-pane"
-                      class="flex-1 w-full p-6 resize-none focus:outline-none font-mono text-sm text-gray-800 bg-white"
+                      class="flex-1 w-full h-full p-8 resize-none focus:outline-none focus:ring-inset focus:ring-2 focus:ring-blue-100 font-mono text-base leading-relaxed text-slate-800 bg-white transition-shadow"
                       placeholder="# Type your markdown here..."></textarea>
         </div>
 
-        <div class="flex-1 flex flex-col min-w-0">
-            <div class="bg-gray-200 px-4 py-2 text-xs font-bold text-gray-600 uppercase tracking-widest border-b border-gray-300">
+        <div class="flex-1 flex flex-col min-w-0 shadow-inner w-full h-full">
+            <div class="bg-slate-100 px-6 py-3 text-sm font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 flex items-center shadow-sm flex-none">
                 Live Preview
             </div>
-            <div id="preview-pane" class="flex-1 p-8 overflow-y-auto bg-white markdown-body">
-                <div class="text-gray-400 text-center mt-10">Start typing to see your live preview...</div>
+            <div id="preview-pane" class="flex-1 w-full h-full p-8 overflow-y-auto bg-white markdown-body text-base leading-relaxed">
+                <div class="text-slate-400 text-center mt-12 text-lg">Start typing to see your live preview...</div>
             </div>
         </div>
     </div>
 </form>
-
-<script>
-    document.body.addEventListener('htmx:afterSwap', function(evt) {
-    if(evt.detail.target.id === 'preview-pane') {
-    document.querySelectorAll('#preview-pane pre code').forEach((el) => {
-    hljs.highlightElement(el);
-    });
-    }
-    });
-</script>
 
 <style>
     @@import url('/css/pdf-styles.css');

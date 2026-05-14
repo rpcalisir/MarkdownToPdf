@@ -49,4 +49,22 @@ public sealed class GeneratePdfCommandValidatorTests
         result.ShouldHaveValidationErrorFor(x => x.MarkdownText)
               .WithErrorMessage("Your Markdown is a bit too long! Please keep it under 50,000 characters.");
     }
+
+    [Fact]
+    public void Validate_ShouldHaveError_WhenMarkdownTextIsEmpty()
+    {
+        // Arrange
+        // ARCHITECTURAL FIX: Instantiating the record using its primary constructor 
+        // instead of an object initializer to satisfy the compiler.
+        var command = new GeneratePdfCommand(string.Empty);
+
+        // Act
+        var result = _validator.TestValidate(command);
+
+        // Assert
+        // Ensures the test assertions perfectly match our updated, user-friendly UI contract.
+        // TEST FIX: Synchronized the expected error message with the actual updated validator output.
+        result.ShouldHaveValidationErrorFor(x => x.MarkdownText)
+              .WithErrorMessage("Oops! Please type or paste some Markdown before generating your PDF.");
+    }
 }

@@ -45,6 +45,13 @@ public sealed class RateLimitingIntegrationTests : IClassFixture<WebApplicationF
         return token;
     }
 
+    // DRY Helper to instantiate the validation payload
+    private static FormUrlEncodedContent CreatePdfRequestPayload(string token) =>
+        new FormUrlEncodedContent([
+            new KeyValuePair<string, string>("MarkdownText", "# Rate Limit Test"),
+            new KeyValuePair<string, string>("__RequestVerificationToken", token)
+        ]);
+
     [Fact]
     public async Task Post_GeneratePdf_ShouldReturn429TooManyRequests_WhenLimitExceeded()
     {
@@ -52,30 +59,24 @@ public sealed class RateLimitingIntegrationTests : IClassFixture<WebApplicationF
 
         for (int i = 0; i < 3; i++)
         {
-            var validContent = new FormUrlEncodedContent([
-                new KeyValuePair<string, string>("MarkdownText", "# Rate Limit Test"),
-                new KeyValuePair<string, string>("__RequestVerificationToken", token)
-            ]);
-
-            var validResponse = await _client.PostAsync("/api/pdf/generate", validContent);
+            var validResponse = await _client.PostAsync("/api/pdf/generate", CreatePdfRequestPayload(token));
 
             // ARCHITECTURAL FIX: Because of the Background Worker Queue, successful initial requests 
             // now immediately return 202 Accepted instead of 200 OK.
             validResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
         }
 
-        var rateLimitContent = new FormUrlEncodedContent([
-            new KeyValuePair<string, string>("MarkdownText", "# Rate Limit Test"),
-            new KeyValuePair<string, string>("__RequestVerificationToken", token)
-        ]);
-
-        var rateLimitedResponse = await _client.PostAsync("/api/pdf/generate", rateLimitContent);
+        var rateLimitedResponse = await _client.PostAsync("/api/pdf/generate", CreatePdfRequestPayload(token));
         var responseString = await rateLimitedResponse.Content.ReadAsStringAsync();
 
         rateLimitedResponse.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
         rateLimitedResponse.Headers.Contains("Retry-After").Should().BeTrue();
 
         rateLimitedResponse.Content.Headers.ContentType?.MediaType.Should().Be("text/html");
-        responseString.Should().Contain("Rate limit exceeded. Please wait one minute");
+
+        // Verifies the user-friendly UI message is rendered
+        // TEST FIX: Razor automatically HTML-encodes apostrophes (You've -> You&#x27;ve) during component rendering. 
+        // Asserting on the substring bypasses encoding mismatches while maintaining strict test integrity.
+        responseString.Should().Contain("reached your request limit");
     }
 }

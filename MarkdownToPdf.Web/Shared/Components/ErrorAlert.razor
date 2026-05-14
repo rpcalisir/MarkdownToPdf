@@ -1,39 +1,35 @@
-﻿@using MarkdownToPdf.Web.Shared.Components
+﻿@namespace MarkdownToPdf.Web.Shared.Components
 
-@if (Errors != null && Errors.Any())
-{
-    // HTMX gracefully swaps this in, and we use basic CSS animation to make it slide in
-    <div class="bg-white border-l-4 border-red-500 shadow-2xl rounded-lg p-5 animate-fade-in transition-all" role="alert">
-        <div class="flex items-start">
-            <div class="flex-shrink-0">
-                <svg class="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-            </div>
-            <div class="ml-3 w-0 flex-1 pt-0.5">
-                <h3 class="text-sm font-bold text-gray-900">Validation Error</h3>
-                <div class="mt-1 text-sm text-gray-600">
-                    <ul class="list-disc pl-5 space-y-1">
-                        @foreach (var error in Errors)
-                        {
-                            <li>@error</li>
-                        }
-                    </ul>
-                </div>
+<div id="@alertId"
+     hx-on:htmx:load="setTimeout(() => this.remove(), 1000)"
+     class="bg-red-50 border-l-4 border-red-500 p-4 mb-4 rounded shadow-lg relative flex justify-between items-start transition-all duration-300" role="alert">
+    <div class="flex">
+        <div class="ml-3">
+            <h3 class="text-sm font-medium text-red-800">Action Required</h3>
+            <div class="mt-2 text-sm text-red-700">
+                <ul class="list-disc pl-5 space-y-1">
+                    @foreach (var error in Errors)
+                    {
+                        <li>@error</li>
+                    }
+                </ul>
             </div>
         </div>
     </div>
     
-    // Auto-dismiss script strictly for UI cleanup
-    <script>
-        setTimeout(() => {
-            const toast = document.getElementById('toast-container');
-            if (toast) toast.innerHTML = '';
-        }, 5000);
-    </script>
-}
+    <button type="button"
+            hx-on:click="document.getElementById('@alertId').remove()"
+            class="ml-auto flex-shrink-0 inline-flex text-red-500 hover:text-red-700 focus:outline-none">
+        <span class="sr-only">Close</span>
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+        </svg>
+    </button>
+</div>
 
 @code {
     [Parameter]
     public List<string> Errors { get; set; } = new();
+
+    private readonly string alertId = $"error-toast-{Guid.NewGuid():N}";
 }
