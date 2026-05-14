@@ -36,11 +36,19 @@ public sealed class PdfGenerationWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var job in _queue.ReadAllAsync(stoppingToken))
+        // PERFORMANCE FIX: Bounded parallelism prevents a single slow PDF from blocking the queue.
+        // It simultaneously protects the host machine by restricting concurrent browser pages to logical cores.
+        var parallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Environment.ProcessorCount > 0 ? Environment.ProcessorCount : 2,
+            CancellationToken = stoppingToken
+        };
+
+        await Parallel.ForEachAsync(_queue.ReadAllAsync(stoppingToken), parallelOptions, async (job, token) =>
         {
             try
             {
-                await UpdateJobStateAsync(job.JobId, JobStatus.Processing, token: stoppingToken);
+                await UpdateJobStateAsync(job.JobId, JobStatus.Processing, token: token);
 
                 // ENTERPRISE FIX: Use CreateAsyncScope() instead of CreateScope().
                 // HtmlRenderer implements IAsyncDisposable. Ensuring it is disposed asynchronously 
@@ -53,13 +61,13 @@ public sealed class PdfGenerationWorker : BackgroundService
 
                 if (_cachedCss is null)
                 {
-                    await _cssLock.WaitAsync(stoppingToken);
+                    await _cssLock.WaitAsync(token);
                     try
                     {
                         if (_cachedCss is null)
                         {
                             var cssPath = Path.Combine(env.WebRootPath, "css", "pdf-styles.css");
-                            _cachedCss = await File.ReadAllTextAsync(cssPath, stoppingToken);
+                            _cachedCss = await File.ReadAllTextAsync(cssPath, token);
                         }
                     }
                     finally
@@ -84,16 +92,16 @@ public sealed class PdfGenerationWorker : BackgroundService
                 });
 
                 // Delegate the heavy OS process to the infrastructure service
-                var pdfBytes = await pdfService.GenerateFromHtmlAsync(fullHtmlDocument, stoppingToken);
+                var pdfBytes = await pdfService.GenerateFromHtmlAsync(fullHtmlDocument, token);
 
-                await UpdateJobStateAsync(job.JobId, JobStatus.Completed, pdfBytes, token: stoppingToken);
+                await UpdateJobStateAsync(job.JobId, JobStatus.Completed, pdfBytes, token: token);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to process PDF job {JobId}", job.JobId);
-                await UpdateJobStateAsync(job.JobId, JobStatus.Failed, errorMessage: "An error occurred while generating the document.", token: stoppingToken);
+                await UpdateJobStateAsync(job.JobId, JobStatus.Failed, errorMessage: "An error occurred while generating the document.", token: token);
             }
-        }
+        });
     }
 
     private async Task UpdateJobStateAsync(Guid jobId, JobStatus status, byte[]? pdfBytes = null, string? errorMessage = null, CancellationToken token = default)
