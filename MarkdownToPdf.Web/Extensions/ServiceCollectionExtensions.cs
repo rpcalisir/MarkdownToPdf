@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Serilog.Core;
+using System.Net;
 using System.Threading.RateLimiting;
 
 namespace MarkdownToPdf.Web.Extensions;
@@ -55,6 +56,7 @@ public static class ServiceCollectionExtensions
         .AddDefaultTokenProviders();
 
         services.AddMemoryCache();
+
         services.AddScoped<Microsoft.AspNetCore.Components.Web.HtmlRenderer>();
         services.AddSingleton<IPdfService, PuppeteerPdfService>();
 
@@ -71,6 +73,11 @@ public static class ServiceCollectionExtensions
             options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
             options.KnownIPNetworks.Clear();
             options.KnownProxies.Clear();
+
+            // SECURITY FIX: Explicitly trust ONLY your internal proxy/load balancer IP range.
+            // Assuming a standard internal network (e.g., 10.0.0.0/8).
+            // Using the modern System.Net.IPNetwork API.
+            options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("10.0.0.0/8"));
         });
 
         return services;

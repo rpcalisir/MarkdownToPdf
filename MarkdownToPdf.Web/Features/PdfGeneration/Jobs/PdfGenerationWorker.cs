@@ -35,8 +35,15 @@ public sealed class PdfGenerationWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Continuously read from the channel as jobs arrive
-        await foreach (var job in _queue.ReadAllAsync(stoppingToken))
+        // PERFORMANCE FIX: Bounded parallelism prevents a single slow PDF from blocking the queue.
+        // It simultaneously protects the host machine by restricting concurrent browser pages to logical cores.
+        var parallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Environment.ProcessorCount,
+            CancellationToken = stoppingToken
+        };
+
+        await Parallel.ForEachAsync(_queue.ReadAllAsync(stoppingToken), parallelOptions, async (job, token) =>
         {
             try
             {
@@ -53,13 +60,13 @@ public sealed class PdfGenerationWorker : BackgroundService
 
                 if (_cachedCss is null)
                 {
-                    await _cssLock.WaitAsync(stoppingToken);
+                    await _cssLock.WaitAsync(token);
                     try
                     {
                         if (_cachedCss is null)
                         {
                             var cssPath = Path.Combine(env.WebRootPath, "css", "pdf-styles.css");
-                            _cachedCss = await File.ReadAllTextAsync(cssPath, stoppingToken);
+                            _cachedCss = await File.ReadAllTextAsync(cssPath, token);
                         }
                     }
                     finally
@@ -84,7 +91,7 @@ public sealed class PdfGenerationWorker : BackgroundService
                 });
 
                 // Delegate the heavy OS process to the infrastructure service
-                var pdfBytes = await pdfService.GenerateFromHtmlAsync(fullHtmlDocument, stoppingToken);
+                var pdfBytes = await pdfService.GenerateFromHtmlAsync(fullHtmlDocument, token);
 
                 UpdateJobState(job.JobId, JobStatus.Completed, pdfBytes);
             }
@@ -93,12 +100,15 @@ public sealed class PdfGenerationWorker : BackgroundService
                 _logger.LogError(ex, "Failed to process PDF job {JobId}", job.JobId);
                 UpdateJobState(job.JobId, JobStatus.Failed, errorMessage: "An error occurred while generating the document.");
             }
-        }
+        });
     }
 
     private void UpdateJobState(Guid jobId, JobStatus status, byte[]? pdfBytes = null, string? errorMessage = null)
     {
         var state = new PdfJobState(jobId, status, pdfBytes, errorMessage);
+
+        // ARCHITECTURAL NOTE: For multi-node deployments, replace this IMemoryCache call 
+        // with IDistributedCache so HTMX status polls can hit any server instance.
         _cache.Set(jobId, state, TimeSpan.FromMinutes(5));
     }
 }

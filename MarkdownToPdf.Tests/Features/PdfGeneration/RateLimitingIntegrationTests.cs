@@ -1,5 +1,7 @@
 ﻿using FluentAssertions;
 using MarkdownToPdf.Web.Features.PdfGeneration;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
@@ -11,6 +13,26 @@ namespace MarkdownToPdf.Tests.Features.PdfGeneration;
 public sealed class RateLimitingIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly HttpClient _client;
+
+    // TEST FIX: Simulates a physical TCP connection from the outside internet.
+    // Without this, the in-memory TestServer defaults to a null IP, which causes 
+    // the ForwardedHeadersMiddleware to bypass security checks and accept spoofed headers.
+    private sealed class FakeRemoteIpStartupFilter : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
+        {
+            return app =>
+            {
+                app.Use(async (context, nextMiddleware) =>
+                {
+                    // Simulating a malicious external caller bypassing the proxy
+                    context.Connection.RemoteIpAddress = IPAddress.Parse("8.8.8.8");
+                    await nextMiddleware();
+                });
+                next(app);
+            };
+        }
+    }
 
     public RateLimitingIntegrationTests(WebApplicationFactory<Program> factory)
     {
@@ -27,6 +49,9 @@ public sealed class RateLimitingIntegrationTests : IClassFixture<WebApplicationF
                 }
 
                 services.AddSingleton<IPdfService, FakePdfService>();
+
+                // Inject the networking simulator into the test pipeline
+                services.AddSingleton<IStartupFilter, FakeRemoteIpStartupFilter>();
             });
         }).CreateClient(clientOptions);
     }
@@ -71,12 +96,32 @@ public sealed class RateLimitingIntegrationTests : IClassFixture<WebApplicationF
 
         rateLimitedResponse.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
         rateLimitedResponse.Headers.Contains("Retry-After").Should().BeTrue();
-
         rateLimitedResponse.Content.Headers.ContentType?.MediaType.Should().Be("text/html");
-
-        // Verifies the user-friendly UI message is rendered
-        // TEST FIX: Razor automatically HTML-encodes apostrophes (You've -> You&#x27;ve) during component rendering. 
-        // Asserting on the substring bypasses encoding mismatches while maintaining strict test integrity.
         responseString.Should().Contain("reached your request limit");
+    }
+
+    [Fact]
+    public async Task Post_GeneratePdf_ShouldNotBypassRateLimit_WhenXForwardedForIsSpoofed()
+    {
+        var token = await GetAntiforgeryTokenAsync();
+
+        // Arrange: Exhaust the standard permit limit (3 requests)
+        for (int i = 0; i < 3; i++)
+        {
+            await _client.PostAsync("/api/pdf/generate", CreatePdfRequestPayload(token));
+        }
+
+        // Act: The attacker attempts to bypass the limit on the 4th request by spoofing a fake proxy IP
+        var spoofedRequest = new HttpRequestMessage(HttpMethod.Post, "/api/pdf/generate")
+        {
+            Content = CreatePdfRequestPayload(token)
+        };
+        spoofedRequest.Headers.Add("X-Forwarded-For", "203.0.113.195"); // Malicious external IP injection
+
+        var rateLimitedResponse = await _client.SendAsync(spoofedRequest);
+
+        // Assert: The middleware correctly identifies the connection is coming from an untrusted network (8.8.8.8),
+        // drops the spoofed header, resolves back to the true IP, and enforces the 429 block.
+        rateLimitedResponse.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
     }
 }
