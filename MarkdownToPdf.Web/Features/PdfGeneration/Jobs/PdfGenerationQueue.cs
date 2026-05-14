@@ -8,10 +8,14 @@ internal sealed class PdfGenerationQueue : IPdfGenerationQueue
 
     public PdfGenerationQueue()
     {
+        // PERFORMANCE FIX: Changed FullMode from Wait to DropWrite. 
+        // If the queue exceeds capacity during a traffic spike, DropWrite instantly discards 
+        // the new job rather than blocking the Minimal API thread, completely preventing thread pool starvation.
         var options = new BoundedChannelOptions(100)
         {
-            FullMode = BoundedChannelFullMode.Wait
+            FullMode = BoundedChannelFullMode.DropWrite
         };
+
         _queue = Channel.CreateBounded<PdfGenerationJob>(options);
     }
 

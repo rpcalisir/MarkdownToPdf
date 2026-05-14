@@ -4,11 +4,11 @@ using MarkdownToPdf.Web.Features.PdfGeneration;
 using MarkdownToPdf.Web.Features.PdfGeneration.Jobs;
 using MarkdownToPdf.Web.Infrastructure.Database;
 using MarkdownToPdf.Web.Shared.Configuration;
-using MarkdownToPdf.Web.Shared.Http;
 using MarkdownToPdf.Web.Shared.Logging;
 using MarkdownToPdf.Web.Shared.Validation;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -58,18 +58,26 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Microsoft.AspNetCore.Components.Web.HtmlRenderer>();
         services.AddSingleton<IPdfService, PuppeteerPdfService>();
 
-        // Register the queue as a Singleton and the Worker as a persistent Hosted Service
         services.AddSingleton<IPdfGenerationQueue, PdfGenerationQueue>();
         services.AddHostedService<PdfGenerationWorker>();
 
         services.ConfigureRateLimiting(configuration);
+
+        // ARCHITECTURAL FIX: Replaced obsolete KnownNetworks with KnownIPNetworks.
+        // This ensures the application correctly extracts the true user IP address 
+        // when deployed behind the reverse proxy of a free hosting provider.
+        services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            options.KnownIPNetworks.Clear();
+            options.KnownProxies.Clear();
+        });
 
         return services;
     }
 
     private static IServiceCollection ConfigureRateLimiting(this IServiceCollection services, IConfiguration configuration)
     {
-        // Register our custom policy handler so DI can resolve it
         services.AddSingleton<PdfGenerationRateLimiterPolicy>();
 
         services.AddRateLimiter(options =>
@@ -82,11 +90,6 @@ public static class ServiceCollectionExtensions
     }
 }
 
-// ARCHITECTURAL FIX: IRateLimiterPolicy requires a synchronous GetPartition method.
-// To bypass rate limiting based on the request body, we must explicitly enable 
-// synchronous IO for this specific pipeline execution. This allows us to peek at 
-// the 'MarkdownText' field and return a NoLimiter partition for empty submissions, 
-// letting MediatR naturally handle the 400 Validation Error via HTMX.
 public class PdfGenerationRateLimiterPolicy : IRateLimiterPolicy<string>
 {
     private readonly RateLimitingSettings _settings;
@@ -116,13 +119,8 @@ public class PdfGenerationRateLimiterPolicy : IRateLimiterPolicy<string>
 
     public RateLimitPartition<string> GetPartition(HttpContext httpContext)
     {
-        var forwardedFor = httpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault();
-        var ipAddress = string.IsNullOrWhiteSpace(forwardedFor)
-            ? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip"
-            : forwardedFor;
+        var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip";
 
-        // Bypassing rate limiting if the MarkdownText is empty.
-        // Since GetPartition is synchronous, we explicitly enable Sync IO to safely peek at the form payload.
         var syncIoFeature = httpContext.Features.Get<IHttpBodyControlFeature>();
         if (syncIoFeature != null)
         {
@@ -131,7 +129,6 @@ public class PdfGenerationRateLimiterPolicy : IRateLimiterPolicy<string>
 
         if (httpContext.Request.HasFormContentType)
         {
-            // This safely caches the parsed form for downstream Minimal API model binding
             var form = httpContext.Request.Form;
 
             if (!form.TryGetValue("MarkdownText", out var text) || string.IsNullOrWhiteSpace(text))

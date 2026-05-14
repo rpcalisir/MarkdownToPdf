@@ -31,6 +31,7 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 
 app.UseRouting();
+app.UseForwardedHeaders();
 app.UseRateLimiter(); // Enforce rate limits immediately after routing
 app.UseAuthentication();
 app.UseAuthorization();

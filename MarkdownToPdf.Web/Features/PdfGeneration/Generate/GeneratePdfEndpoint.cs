@@ -1,5 +1,7 @@
 ﻿using Carter;
 using MediatR;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
@@ -18,6 +20,9 @@ public sealed class GeneratePdfEndpoint : ICarterModule
         var group = app.MapGroup(string.Empty)
                        .WithTags(Api.Tags.PdfGeneration);
 
+        // ARCHITECTURAL FIX: Removed the redundant .RequireAntiforgery() call. 
+        // .NET 8 Minimal APIs automatically validate antiforgery tokens for any endpoint 
+        // configured with a [FromForm] parameter when the middleware is active.
         group.MapPost(Api.Routes.PdfGeneration.Generate, HandleGenerateAsync)
              .RequireRateLimiting("PdfGenerationPolicy");
 
